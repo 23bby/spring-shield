@@ -1,0 +1,8 @@
+/.mvn/
+/target/
+.help/
+.DS_Store
+.idea/
+.vscode/
+*.class
+*.jar
