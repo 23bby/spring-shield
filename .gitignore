@@ -1,8 +1,28 @@
-/.mvn/
+# --- JAVA & MAVEN ---
 /target/
-.help/
-.DS_Store
-.idea/
-.vscode/
 *.class
 *.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+/.mvn/
+!/.mvn/wrapper
+
+# --- IDE (IntelliJ, VSCode, ecc.) ---
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.DS_Store
+
+# --- DB & LOGS (Fondamentale per il tuo progetto) ---
+*.db
+*.db-journal
+*.log
+
+# --- Altri ---
+.help/
