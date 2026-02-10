@@ -49,6 +49,6 @@
 
     <VBox alignment="CENTER" spacing="2.0">
         <Label text="DRAG AND DROP FILES TO SHIELD" textFill="#555555" style="-fx-font-weight: bold; -fx-font-size: 9.0;" />
-        <Label text="STATUS: CROCCO IS ON GUARD" textFill="#4caf50" style="-fx-font-style: italic; -fx-font-size: 10.0;" />
+        <Label fx:id="statusLabel" text="STATUS: CROCCO IS ON GUARD" textFill="#4caf50" style="-fx-font-style: italic; -fx-font-size: 10.0;" />
     </VBox>
 </VBox>

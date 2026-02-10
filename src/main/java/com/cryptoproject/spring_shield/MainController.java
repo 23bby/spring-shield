@@ -1,5 +1,7 @@
 package com.cryptoproject.spring_shield;
 
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
@@ -7,7 +9,7 @@ import javafx.scene.control.*;
 import javafx.scene.input.TransferMode;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
-import javafx.stage.Stage;
+import javafx.util.Duration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.io.File;
@@ -23,100 +25,134 @@ public class MainController {
     @FXML private ListView<String> historyList;
     @FXML private VBox rect1, rect2, rect3;
     @FXML private Label strengthLabel;
+    @FXML private Label statusLabel; // Ricordati l'fx:id nell'XML!
 
-    private ObservableList<String> encryptedFiles = FXCollections.observableArrayList();
+    private ObservableList<String> historyItems = FXCollections.observableArrayList();
+    private Timeline autoLockTimer;
 
     @FXML
     public void initialize() {
-        encryptedFiles.addAll(dbService.getHistory());
-        if (historyList != null) historyList.setItems(encryptedFiles);
+        // Carica la cronologia dal database
+        if (dbService != null) historyItems.addAll(dbService.getHistory());
+        historyList.setItems(historyItems);
 
-        rootNode.setOnDragOver(event -> {
-            if (event.getDragboard().hasFiles()) event.acceptTransferModes(TransferMode.COPY);
-            event.consume();
+        // Gestione Drag & Drop
+        rootNode.setOnDragOver(e -> {
+            if (e.getDragboard().hasFiles()) e.acceptTransferModes(TransferMode.COPY);
+            e.consume();
+        });
+        rootNode.setOnDragDropped(e -> {
+            var db = e.getDragboard();
+            if (db.hasFiles()) processFile(db.getFiles().get(0), true);
+            e.setDropCompleted(true);
+            e.consume();
         });
 
-        rootNode.setOnDragDropped(event -> {
-            var db = event.getDragboard();
-            if (db.hasFiles()) handleQuickShield(db.getFiles().get(0));
-            event.setDropCompleted(true);
-            event.consume();
+        // Monitoraggio password e reset timer inattività
+        passwordField.textProperty().addListener((obs, old, newVal) -> {
+            updateStrengthMeter(newVal);
+            resetTimer();
         });
 
-        passwordField.textProperty().addListener((obs, oldVal, newVal) -> updateStrengthMeter(newVal));
+        setupAutoLock();
+    }
+
+    private void processFile(File file, boolean encrypt) {
+        String pw = passwordField.getText();
+        if (pw.isEmpty()) {
+            updateStatus("ERRORE: INSERISCI PASSWORD!", "#ff4444");
+            return;
+        }
+
+        try {
+            if (encrypt) {
+                cryptoService.encryptFile(file, pw);
+                addLog("🛡️ SHIELDED: " + file.getName());
+                updateStatus("FILE INGHIOTTITO!", "#4caf50");
+            } else {
+                cryptoService.decryptFile(file, pw);
+                addLog("🔓 UNLOCKED: " + file.getName().replace(".shield", ""));
+                updateStatus("FILE LIBERATO!", "#4caf50");
+            }
+            passwordField.clear();
+        } catch (Exception e) {
+            updateStatus("ERRORE: PASSWORD ERRATA", "#ff4444");
+        }
+    }
+
+    private void setupAutoLock() {
+        autoLockTimer = new Timeline(new KeyFrame(Duration.seconds(60), event -> {
+            passwordField.clear();
+            updateStatus("AUTO-LOCK ATTIVATO", "#ffca28");
+        }));
+        autoLockTimer.setCycleCount(1);
+        autoLockTimer.play();
+    }
+
+    private void resetTimer() {
+        if (autoLockTimer != null) autoLockTimer.playFromStart();
+    }
+
+    private void updateStatus(String msg, String color) {
+        if (statusLabel != null) {
+            statusLabel.setText("STATUS: " + msg);
+            statusLabel.setStyle("-fx-text-fill: " + color + ";");
+        }
+    }
+
+    private void addLog(String msg) {
+        historyItems.add(0, msg);
+        if (dbService != null) dbService.saveToDb(msg, "ACTION");
     }
 
     private void updateStrengthMeter(String pw) {
         String off = "-fx-background-color: #333333;";
         rect1.setStyle(off); rect2.setStyle(off); rect3.setStyle(off);
-        if (pw.isEmpty()) { strengthLabel.setText("WAITING FOR KEY..."); }
-        else if (pw.length() < 6) { rect1.setStyle("-fx-background-color: #ff4444;"); strengthLabel.setText("WEAK"); }
-        else if (pw.length() < 10) { rect1.setStyle("-fx-background-color: #ffca28;"); rect2.setStyle("-fx-background-color: #ffca28;"); strengthLabel.setText("MEDIUM"); }
-        else { rect1.setStyle("-fx-background-color: #4caf50;"); rect2.setStyle("-fx-background-color: #4caf50;"); rect3.setStyle("-fx-background-color: #4caf50;"); strengthLabel.setText("STRONG"); }
+        if (pw.length() > 0) rect1.setStyle("-fx-background-color: #ff4444;");
+        if (pw.length() > 6) rect2.setStyle("-fx-background-color: #ffca28;");
+        if (pw.length() > 10) rect3.setStyle("-fx-background-color: #4caf50;");
     }
 
-    @FXML
-    private void handleEncryptFile() { processFile(pickFile("Select file", false), true); }
+    @FXML private void handleEncryptFile() { processFile(pickFile(false), true); }
+    @FXML private void handleDecryptFile() { processFile(pickFile(true), false); }
+    @FXML private void handleClearHistory() { historyItems.clear(); if (dbService != null) dbService.clearHistory(); }
 
-    @FXML
-    private void handleDecryptFile() { processFile(pickFile("Select .shield file", true), false); }
-
-    private void handleQuickShield(File file) { processFile(file, true); }
-
-    private void processFile(File file, boolean encrypt) {
-        String password = passwordField.getText();
-        if (password.isEmpty()) { showNotify("Attention", "Enter password!", Alert.AlertType.WARNING); return; }
-        if (file != null) {
-            try {
-                if (encrypt) {
-                    cryptoService.encryptFile(file, password);
-                    String newPath = file.getAbsolutePath() + ".shield";
-                    dbService.saveToDb(newPath, "SHIELDED");
-                    encryptedFiles.add(0, "🛡️ SHIELDED: " + newPath);
-                } else {
-                    cryptoService.decryptFile(file, password);
-                    String newPath = file.getAbsolutePath().replace(".shield", "");
-                    dbService.saveToDb(newPath, "UNSHIELDED");
-                    encryptedFiles.add(0, "🔓 UNLOCKED: " + newPath);
-                }
-                passwordField.clear();
-            } catch (Exception e) { showNotify("Error", "Failed!", Alert.AlertType.ERROR); }
-        }
+    private File pickFile(boolean isShield) {
+        FileChooser fc = new FileChooser();
+        if (isShield) fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Shield", "*.shield"));
+        return fc.showOpenDialog(rootNode.getScene().getWindow());
     }
 
     @FXML
     private void handleOpenFolder() {
-        String selected = historyList.getSelectionModel().getSelectedItem();
-        if (selected == null) return;
+        try {
+            // Definiamo il percorso della cartella Documenti dell'utente
+            String folderPath = System.getProperty("user.home") + File.separator + "Documents";
+            File file = new File(folderPath);
 
-        // Estraiamo il percorso saltando il prefisso "🛡️ SHIELDED: "
-        String fullPath = selected.substring(selected.indexOf(": ") + 2);
-        File file = new File(fullPath);
-        File parentDir = file.getParentFile(); // Questa è la cartella che contiene il file
+            // Se la cartella Documenti non esiste, usiamo la cartella Home principale
+            if (!file.exists()) {
+                file = new File(System.getProperty("user.home"));
+            }
 
-        if (parentDir != null && parentDir.exists()) {
-            try {
-                ProcessBuilder pb;
-                if (System.getProperty("os.name").toLowerCase().contains("win")) {
-                    pb = new ProcessBuilder("explorer.exe", parentDir.getAbsolutePath());
-                } else {
-                    pb = new ProcessBuilder("xdg-open", parentDir.getAbsolutePath());
-                }
-                pb.start();
-            } catch (Exception e) { e.printStackTrace(); }
+            String os = System.getProperty("os.name").toLowerCase();
+
+            if (os.contains("win")) {
+                // Comando per Windows
+                new ProcessBuilder("explorer.exe", file.getAbsolutePath()).start();
+            } else if (os.contains("mac")) {
+                // Comando per macOS
+                new ProcessBuilder("open", file.getAbsolutePath()).start();
+            } else {
+                // Comando per Linux (come nel tuo screenshot)
+                new ProcessBuilder("xdg-open", file.getAbsolutePath()).start();
+            }
+
+            updateStatus("CARTELLA APERTA", "#4caf50");
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            updateStatus("ERRORE APERTURA CARTELLA", "#ff4444");
         }
-    }
-
-    @FXML
-    private void handleClearHistory() { dbService.clearHistory(); encryptedFiles.clear(); }
-
-    private File pickFile(String t, boolean s) {
-        FileChooser fc = new FileChooser(); fc.setTitle(t);
-        if (s) fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Shield Files", "*.shield"));
-        return fc.showOpenDialog(new Stage());
-    }
-
-    private void showNotify(String t, String m, Alert.AlertType type) {
-        Alert a = new Alert(type); a.setTitle(t); a.setHeaderText(null); a.setContentText(m); a.showAndWait();
     }
 }

@@ -6,73 +6,68 @@ import javax.crypto.spec.SecretKeySpec;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.security.MessageDigest;
-import java.util.Arrays;
+import java.nio.file.Files;
 
-@Service
+@Service // FONDAMENTALE: permette a Spring di trovare questa classe
 public class CryptoService {
 
-    /**
-     * Metodo per criptare il file (Il tuo codice originale)
-     */
+    private static final String ALGORITHM = "AES";
+    private static final String MAGIC_WORD = "CROCCO";
+
     public void encryptFile(File inputFile, String password) throws Exception {
         byte[] key = generateKey(password);
-        SecretKeySpec secretKey = new SecretKeySpec(key, "AES");
-
-        Cipher cipher = Cipher.getInstance("AES");
+        SecretKeySpec secretKey = new SecretKeySpec(key, ALGORITHM);
+        Cipher cipher = Cipher.getInstance(ALGORITHM);
         cipher.init(Cipher.ENCRYPT_MODE, secretKey);
 
-        byte[] inputBytes = new FileInputStream(inputFile).readAllBytes();
-        byte[] outputBytes = cipher.doFinal(inputBytes);
-
         File outputFile = new File(inputFile.getAbsolutePath() + ".shield");
-        try (FileOutputStream outputStream = new FileOutputStream(outputFile)) {
-            outputStream.write(outputBytes);
+
+        // Leggiamo tutto il file, aggiungiamo la firma e criptiamo
+        byte[] inputBytes = Files.readAllBytes(inputFile.toPath());
+        byte[] encryptedBytes = cipher.doFinal(inputBytes);
+
+        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+            fos.write(MAGIC_WORD.getBytes()); // Firma identificativa
+            fos.write(encryptedBytes);
         }
 
-        System.out.println("🚀 File criptato con successo: " + outputFile.getName());
+        // Se la protezione è riuscita, eliminiamo l'originale
+        if (outputFile.exists()) {
+            Files.delete(inputFile.toPath());
+        }
     }
 
-    /**
-     * Metodo per decriptare il file
-     */
     public void decryptFile(File inputFile, String password) throws Exception {
-        // 1. Generiamo la stessa chiave usata per criptare
         byte[] key = generateKey(password);
-        SecretKeySpec secretKey = new SecretKeySpec(key, "AES");
-
-        // 2. Prepariamo AES in modalità DECRYPT
-        Cipher cipher = Cipher.getInstance("AES");
+        SecretKeySpec secretKey = new SecretKeySpec(key, ALGORITHM);
+        Cipher cipher = Cipher.getInstance(ALGORITHM);
         cipher.init(Cipher.DECRYPT_MODE, secretKey);
 
-        // 3. Leggiamo il file .shield
-        byte[] inputBytes = new FileInputStream(inputFile).readAllBytes();
-        byte[] outputBytes = cipher.doFinal(inputBytes);
+        try (FileInputStream fis = new FileInputStream(inputFile)) {
+            // Verifica firma "CROCCO"
+            byte[] header = new byte[MAGIC_WORD.length()];
+            fis.read(header);
+            if (!new String(header).equals(MAGIC_WORD)) {
+                throw new Exception("Firma non valida! Questo non è un file del Crocco.");
+            }
 
-        // 4. Determiniamo il nome del file originale togliendo .shield
-        String originalPath = inputFile.getAbsolutePath();
-        if (originalPath.endsWith(".shield")) {
-            originalPath = originalPath.substring(0, originalPath.length() - 7);
-        } else {
-            originalPath = originalPath + ".decrypted"; // Sicurezza se il file non ha estensione
+            byte[] encryptedBytes = fis.readAllBytes();
+            byte[] decryptedBytes = cipher.doFinal(encryptedBytes);
+
+            File outputFile = new File(inputFile.getAbsolutePath().replace(".shield", ""));
+            Files.write(outputFile.toPath(), decryptedBytes);
+
+            // Se liberato con successo, eliminiamo il file .shield
+            Files.delete(inputFile.toPath());
         }
-
-        File outputFile = new File(originalPath);
-        try (FileOutputStream outputStream = new FileOutputStream(outputFile)) {
-            outputStream.write(outputBytes);
-        }
-
-        System.out.println("🔓 File decriptato con successo: " + outputFile.getName());
     }
 
-    /**
-     * Metodo di supporto per creare la chiave dalla password (SHA-256)
-     * Così evitiamo di ripetere il codice in entrambi i metodi.
-     */
-    private byte[] generateKey(String password) throws Exception {
-        byte[] key = password.getBytes("UTF-8");
-        MessageDigest sha = MessageDigest.getInstance("SHA-256");
-        key = sha.digest(key);
-        return Arrays.copyOf(key, 32); // 256 bit
+    private byte[] generateKey(String password) {
+        byte[] key = new byte[16];
+        byte[] passBytes = password.getBytes();
+        for (int i = 0; i < 16; i++) {
+            key[i] = (i < passBytes.length) ? passBytes[i] : 0;
+        }
+        return key;
     }
 }
